@@ -7,6 +7,9 @@ set(LIB_VERSION_STRING "${LIB_MAJOR_VERSION}.${LIB_MINOR_VERSION}.${LIB_PATCH_VE
 
 PROJECT(liburing VERSION "${LIB_VERSION_STRING}" LANGUAGES C CXX)
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
+
 if (NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
     message(WARNING "io_uring is only supported by Linux, but the target OS is ${CMAKE_SYSTEM_NAME}.")
 endif ()
@@ -26,3 +29,5 @@ if (LIBURING_BUILD_EXAMPLES OR LIBURING_BUILD_BENCHMARKS)
         set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build, options are: Debug Release RelWithDebInfo MinSizeRel." FORCE)
     endif ()
 endif ()
+
+add_subdirectory(example)
