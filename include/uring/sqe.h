@@ -94,8 +94,7 @@ public:
     this->buf_index = buf_index;
   }
 
-  void prep_recvmsg(const int fd, msghdr *msg,
-                    const unsigned flags) noexcept {
+  void prep_recvmsg(const int fd, msghdr *msg, const unsigned flags) noexcept {
     prep_rw(IORING_OP_RECVMSG, fd, msg, 1, 0);
     this->msg_flags = flags;
   }
@@ -106,10 +105,41 @@ public:
     this->ioprio |= IORING_RECV_MULTISHOT;
   }
 
-  void prep_sendmsg(const int fd, const msghdr *msg, const unsigned flags) noexcept {
+  void prep_sendmsg(const int fd, const msghdr *msg,
+                    const unsigned flags) noexcept {
     prep_rw(IORING_OP_SENDMSG, fd, msg, 1, 0);
     this->msg_flags = flags;
   }
+
+  void prep_poll_add(const int fd, const unsigned poll_mask) noexcept {
+    prep_rw(IORING_OP_POLL_ADD, fd, nullptr, 0, 0);
+    this->poll32_events = prep_poll_mask(poll_mask);
+  }
+
+  void prep_poll_multishot(const int fd, const unsigned poll_mask) noexcept {
+    prep_poll_add(fd, poll_mask);
+    this->len = IORING_POLL_ADD_MULTI;
+  }
+
+  void prep_poll_remove(const uint64_t user_data) noexcept {
+    prep_rw(IORING_OP_POLL_REMOVE, -1, nullptr, 0, 0);
+    this->addr = user_data;
+  }
+
+  void prep_poll_update(const uint64_t old_user_data,
+                        const uint64_t new_user_data, unsigned poll_mask,
+                        const unsigned flags) noexcept {
+    prep_rw(IORING_OP_POLL_REMOVE, -1, nullptr, flags, new_user_data);
+    this->addr = old_user_data;
+    this->poll32_events = prep_poll_mask(poll_mask);
+  }
+
+  void prep_fsync(const int fd, const unsigned fsync_flags) noexcept {
+    prep_rw(IORING_OP_FSYNC, fd, nullptr, 0, 0);
+    this->fsync_flags = fsync_flags;
+  }
+
+  void prep_nop() noexcept { prep_rw(IORING_OP_NOP, -1, nullptr, 0, 0); }
 
 private:
   void set_target_fixed_file(const unsigned int file_index) noexcept {
@@ -131,6 +161,13 @@ private:
     this->file_index = 0;
     this->addr3 = 0;
     this->__pad2[0] = 0;
+  }
+
+  static unsigned prep_poll_mask(unsigned poll_mask) noexcept {
+#if __BYTE_ORDER == __BIG_ENDIAN
+    poll_mask = __swahw32(poll_mask);
+#endif
+    return poll_mask;
   }
 };
 
