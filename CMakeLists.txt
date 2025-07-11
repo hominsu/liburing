@@ -22,6 +22,7 @@ target_include_directories(${PROJECT_NAME} INTERFACE
 )
 
 include(${PROJECT_SOURCE_DIR}/cmake/Option.cmake)
+include(${PROJECT_SOURCE_DIR}/cmake/Configure.cmake)
 
 if (LIBURING_BUILD_EXAMPLES OR LIBURING_BUILD_BENCHMARKS)
     # compile in release by default
