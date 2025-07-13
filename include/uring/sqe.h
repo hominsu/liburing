@@ -568,8 +568,10 @@ private:
   }
 };
 
-static_assert(std::is_standard_layout_v<io_uring_sqe>,
-              "Must maintain C-compatible layout");
+static_assert(std::is_standard_layout_v<sqe>);
+static_assert(sizeof(sqe) == sizeof(io_uring_sqe));
+static_assert(sizeof(sqe) == 64);
+static_assert(alignof(sqe) == 8);
 
 } // namespace liburing
 
