@@ -41,5 +41,3 @@ configure_file(
         ${PROJECT_SOURCE_DIR}/include/uring/compat.h.in
         ${PROJECT_BINARY_DIR}/include/uring/compat.h
 )
-
-include_directories(${PROJECT_BINARY_DIR}/include)

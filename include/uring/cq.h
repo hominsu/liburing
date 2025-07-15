@@ -2,10 +2,12 @@
 #define URING_CQ_H
 
 #include "uring/cqe.h"
+#include "uring/params.h"
 
 namespace liburing {
 
-struct cq {
+class cq {
+public:
   struct get_data {
     unsigned submit;
     unsigned wait_nr;
@@ -18,17 +20,31 @@ struct cq {
   cq() noexcept = default;
   ~cq() noexcept = default;
 
-private:
-  unsigned *khead;
-  unsigned *ktail;
-  unsigned *ring_mask;
-  unsigned *ring_entries;
-  unsigned *kflags;
-  unsigned *koverflow;
-  cqe *cqes;
+  void setup_ring_pointers(const uring_params &p) noexcept {
+    const auto &off = p.cq_off;
 
-  std::size_t ring_sz;
-  void *ring_ptr;
+    khead_ = static_cast<unsigned *>(ring_ptr_ + off.head);
+    ktail_ = static_cast<unsigned *>(ring_ptr_ + off.tail);
+    ring_mask_ = *static_cast<unsigned *>(ring_ptr_ + off.ring_mask);
+    ring_entries_ = *static_cast<unsigned *>(ring_ptr_ + off.ring_entries);
+    if (off.flags) {
+      kflags_ = static_cast<unsigned *>(ring_ptr_ + off.flags);
+    }
+    koverflow_ = static_cast<unsigned *>(ring_ptr_ + off.overflow);
+    cqes_ = static_cast<cqe *>(ring_ptr_ + off.cqes);
+  }
+
+private:
+  unsigned *khead_;
+  unsigned *ktail_;
+  unsigned ring_mask_;
+  unsigned ring_entries_;
+  unsigned *kflags_;
+  unsigned *koverflow_;
+  cqe *cqes_;
+
+  std::size_t ring_sz_;
+  void *ring_ptr_;
 };
 
 } // namespace liburing

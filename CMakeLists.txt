@@ -16,13 +16,15 @@ endif ()
 
 add_library(${PROJECT_NAME} INTERFACE)
 add_library(${PROJECT_NAME}::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
-target_include_directories(${PROJECT_NAME} INTERFACE
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
-)
 
 include(${PROJECT_SOURCE_DIR}/cmake/Option.cmake)
 include(${PROJECT_SOURCE_DIR}/cmake/Configure.cmake)
+
+target_include_directories(${PROJECT_NAME} INTERFACE
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)
 
 if (LIBURING_BUILD_EXAMPLES OR LIBURING_BUILD_BENCHMARKS)
     # compile in release by default
