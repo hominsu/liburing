@@ -6,10 +6,12 @@
 
 namespace liburing {
 
-struct uring_params;
+template <unsigned uring_flags> class uring;
 
 class sq {
 public:
+  template <unsigned uring_flags> friend class uring;
+
   sq() noexcept = default;
   ~sq() noexcept = default;
 

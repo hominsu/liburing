@@ -6,8 +6,12 @@
 
 namespace liburing {
 
+template <unsigned uring_flags> class uring;
+
 class cq {
 public:
+  template <unsigned uring_flags> friend class uring;
+
   struct get_data {
     unsigned submit;
     unsigned wait_nr;
