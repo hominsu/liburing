@@ -1,23 +1,23 @@
 #ifndef URING_SQE_H
 #define URING_SQE_H
 
-#include "uring/compat.h"
-#include "uring/io_uring.h"
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
 
 #include <cstdint>
 #include <span>
 #include <type_traits>
 
-#include <fcntl.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
+#include "uring/compat.h"
+#include "uring/io_uring.h"
 
 struct epoll_event;
 
 namespace liburing {
 
 class sqe final : io_uring_sqe {
-public:
+ public:
   void set_data(void *data) noexcept {
     this->user_data = reinterpret_cast<uint64_t>(data);
   }
@@ -538,7 +538,7 @@ public:
                        flags);
   }
 
-private:
+ private:
   void set_target_fixed_file(unsigned int file_index) noexcept {
     this->file_index = file_index + 1;
   }
@@ -573,6 +573,6 @@ static_assert(sizeof(sqe) == sizeof(io_uring_sqe));
 static_assert(sizeof(sqe) == 64);
 static_assert(alignof(sqe) == 8);
 
-} // namespace liburing
+}  // namespace liburing
 
-#endif // URING_SQE_H
+#endif  // URING_SQE_H

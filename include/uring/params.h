@@ -1,9 +1,9 @@
 #ifndef URING_PARAMS_H
 #define URING_PARAMS_H
 
-#include "uring/io_uring.h"
-
 #include <type_traits>
+
+#include "uring/io_uring.h"
 
 namespace liburing {
 
@@ -16,6 +16,6 @@ struct uring_params final : io_uring_params {
 
 static_assert(std::is_standard_layout_v<uring_params>);
 
-} // namespace liburing
+}  // namespace liburing
 
-#endif // URING_PARAMS_H
+#endif  // URING_PARAMS_H

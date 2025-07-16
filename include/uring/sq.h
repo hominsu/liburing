@@ -6,11 +6,13 @@
 
 namespace liburing {
 
-template <unsigned uring_flags> class uring;
+template <unsigned uring_flags>
+class uring;
 
 class sq {
-public:
-  template <unsigned uring_flags> friend class uring;
+ public:
+  template <unsigned uring_flags>
+  friend class uring;
 
   sq() noexcept = default;
   ~sq() noexcept = default;
@@ -29,7 +31,7 @@ public:
     }
   }
 
-private:
+ private:
   unsigned *khead_;
   unsigned *ktail_;
   unsigned ring_mask_;
@@ -46,6 +48,6 @@ private:
   void *ring_ptr_;
 };
 
-} // namespace liburing
+}  // namespace liburing
 
-#endif // URING_SQ_H
+#endif  // URING_SQ_H

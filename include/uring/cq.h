@@ -6,11 +6,13 @@
 
 namespace liburing {
 
-template <unsigned uring_flags> class uring;
+template <unsigned uring_flags>
+class uring;
 
 class cq {
-public:
-  template <unsigned uring_flags> friend class uring;
+ public:
+  template <unsigned uring_flags>
+  friend class uring;
 
   struct get_data {
     unsigned submit;
@@ -38,7 +40,7 @@ public:
     cqes_ = static_cast<cqe *>(ring_ptr_ + off.cqes);
   }
 
-private:
+ private:
   unsigned *khead_;
   unsigned *ktail_;
   unsigned ring_mask_;
@@ -51,6 +53,6 @@ private:
   void *ring_ptr_;
 };
 
-} // namespace liburing
+}  // namespace liburing
 
-#endif // URING_CQ_H
+#endif  // URING_CQ_H

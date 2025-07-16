@@ -1,9 +1,9 @@
 #ifndef URING_CQE_H
 #define URING_CQE_H
 
-#include "uring/io_uring.h"
-
 #include <type_traits>
+
+#include "uring/io_uring.h"
 
 namespace liburing {
 
@@ -14,6 +14,6 @@ static_assert(sizeof(cqe) == sizeof(io_uring_cqe));
 static_assert(sizeof(cqe) == 16);
 static_assert(alignof(cqe) == 8);
 
-} // namespace liburing
+}  // namespace liburing
 
-#endif // URING_CQE_H
+#endif  // URING_CQE_H
