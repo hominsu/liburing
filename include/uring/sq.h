@@ -6,9 +6,6 @@
 
 namespace liburing {
 
-template <unsigned uring_flags>
-class uring;
-
 class sq {
  public:
   template <unsigned uring_flags>
@@ -17,7 +14,8 @@ class sq {
   sq() noexcept = default;
   ~sq() noexcept = default;
 
-  void setup_ring_pointers(const uring_params &p) noexcept {
+  template <unsigned uring_flags>
+  void setup_ring_pointers(const uring_params<uring_flags> &p) noexcept {
     const auto &off = p.sq_off;
 
     khead_ = static_cast<unsigned *>(ring_ptr_ + off.head);

@@ -7,14 +7,12 @@
 
 namespace liburing {
 
+template <unsigned uring_flags>
 struct uring_params final : io_uring_params {
-  uring_params() noexcept : io_uring_params{} {}
-
-  explicit uring_params(const unsigned flags) noexcept
-      : io_uring_params{.flags = flags} {}
+  explicit uring_params() noexcept : io_uring_params{.flags = uring_flags} {}
 };
 
-static_assert(std::is_standard_layout_v<uring_params>);
+static_assert(std::is_standard_layout_v<uring_params<0>>);
 
 }  // namespace liburing
 
