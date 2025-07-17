@@ -27,15 +27,15 @@ class cq {
   void setup_ring_pointers(const uring_params<uring_flags> &p) noexcept {
     const auto &off = p.cq_off;
 
-    khead_ = static_cast<unsigned *>(ring_ptr_ + off.head);
-    ktail_ = static_cast<unsigned *>(ring_ptr_ + off.tail);
-    ring_mask_ = *static_cast<unsigned *>(ring_ptr_ + off.ring_mask);
-    ring_entries_ = *static_cast<unsigned *>(ring_ptr_ + off.ring_entries);
-    if (off.flags) {
-      kflags_ = static_cast<unsigned *>(ring_ptr_ + off.flags);
-    }
-    koverflow_ = static_cast<unsigned *>(ring_ptr_ + off.overflow);
-    cqes_ = static_cast<cqe *>(ring_ptr_ + off.cqes);
+    // clang-format off
+    khead_ = reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.head);
+    ktail_ = reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.tail);
+    ring_mask_ = *reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.ring_mask);
+    ring_entries_ = *reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.ring_entries);
+    if (off.flags) { kflags_ = reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.flags); }
+    koverflow_ = reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.overflow);
+    cqes_ = reinterpret_cast<cqe *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.cqes);
+    // clang-format on
   }
 
  private:

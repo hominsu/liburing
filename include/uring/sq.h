@@ -18,15 +18,15 @@ class sq {
   void setup_ring_pointers(const uring_params<uring_flags> &p) noexcept {
     const auto &off = p.sq_off;
 
-    khead_ = static_cast<unsigned *>(ring_ptr_ + off.head);
-    ktail_ = static_cast<unsigned *>(ring_ptr_ + off.tail);
-    ring_mask_ = *static_cast<unsigned *>(ring_ptr_ + off.ring_mask);
-    ring_entries_ = *static_cast<unsigned *>(ring_ptr_ + off.ring_entries);
-    kflags_ = static_cast<unsigned *>(ring_ptr_ + off.flags);
-    kdropped_ = static_cast<unsigned *>(ring_ptr_ + off.dropped);
-    if (!(p.flags & IORING_SETUP_NO_SQARRAY)) {
-      array_ = static_cast<unsigned *>(ring_ptr_ + off.array);
-    }
+    // clang-format off
+    khead_ = reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.head);
+    ktail_ = reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.tail);
+    ring_mask_ = *reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.ring_mask);
+    ring_entries_ = *reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.ring_entries);
+    kflags_ = reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.flags);
+    kdropped_ = reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.dropped);
+    if (!(p.flags & IORING_SETUP_NO_SQARRAY)) { array_ = reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.array); }
+    // clang-format on
   }
 
  private:

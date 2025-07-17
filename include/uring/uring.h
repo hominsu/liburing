@@ -124,9 +124,9 @@ void uring<uring_flags>::mmap(int fd, const uring_params<uring_flags> &p) {
     }
   }
 
-  sq_.sqes_ =
+  sq_.sqes_ = static_cast<sqe *>(
       __sys_mmap(nullptr, sqes_size(p.sq_entries), PROT_READ | PROT_WRITE,
-                 MAP_SHARED | MAP_POPULATE, fd, IORING_OFF_SQES);
+                 MAP_SHARED | MAP_POPULATE, fd, IORING_OFF_SQES));
   if (sq_.sqes_ == MAP_FAILED) [[unlikely]] {
     munmap();
     throw std::system_error{errno, std::system_category(),
