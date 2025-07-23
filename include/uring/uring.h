@@ -63,9 +63,9 @@ class uring {
   cq<uring_flags> cq_;
   int ring_fd_ = -1;
 
-  unsigned features_;
-  int enter_ring_fd_;
-  uint8_t int_flags_;
+  unsigned features_{};
+  int enter_ring_fd_{};
+  uint8_t int_flags_{};
 };
 
 template <unsigned uring_flags>
