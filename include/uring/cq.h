@@ -6,9 +6,10 @@
 
 namespace liburing {
 
+template <unsigned uring_flags>
 class cq {
  public:
-  template <unsigned uring_flags>
+  template <unsigned>
   friend class uring;
 
   struct get_data {
@@ -23,22 +24,12 @@ class cq {
   cq() noexcept = default;
   ~cq() noexcept = default;
 
-  template <unsigned uring_flags>
-  void setup_ring_pointers(const uring_params<uring_flags> &p) noexcept {
-    const auto &off = p.cq_off;
-
-    // clang-format off
-    khead_ = reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.head);
-    ktail_ = reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.tail);
-    ring_mask_ = *reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.ring_mask);
-    ring_entries_ = *reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.ring_entries);
-    if (off.flags) { kflags_ = reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.flags); }
-    koverflow_ = reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.overflow);
-    cqes_ = reinterpret_cast<cqe *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.cqes);
-    // clang-format on
-  }
+  void setup_ring_pointers(const uring_params<uring_flags> &p) noexcept;
 
  private:
+  static constexpr unsigned cqe_shift_from_flags(unsigned flags) noexcept;
+  static constexpr std::size_t cq_size(unsigned cqes) noexcept;
+
   unsigned *khead_;
   unsigned *ktail_;
   unsigned ring_mask_;
@@ -50,6 +41,33 @@ class cq {
   std::size_t ring_sz_;
   void *ring_ptr_;
 };
+
+template <unsigned uring_flags>
+void cq<uring_flags>::setup_ring_pointers(const uring_params<uring_flags> &p) noexcept {
+  const auto &off = p.cq_off;
+
+  // clang-format off
+  khead_ = reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.head);
+  ktail_ = reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.tail);
+  ring_mask_ = *reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.ring_mask);
+  ring_entries_ = *reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.ring_entries);
+  if (off.flags) { kflags_ = reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.flags); }
+  koverflow_ = reinterpret_cast<unsigned *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.overflow);
+  cqes_ = reinterpret_cast<cqe *>(reinterpret_cast<uintptr_t>(ring_ptr_) + off.cqes);
+  // clang-format on
+}
+
+template <unsigned uring_flags>
+constexpr unsigned cq<uring_flags>::cqe_shift_from_flags(
+    const unsigned flags) noexcept {
+  return !!(flags & IORING_SETUP_CQE32);
+}
+
+template <unsigned uring_flags>
+constexpr std::size_t cq<uring_flags>::cq_size(unsigned cqes) noexcept {
+  cqes <<= cqe_shift_from_flags(uring_flags);
+  return cqes * sizeof(cqe);
+}
 
 }  // namespace liburing
 

@@ -59,11 +59,8 @@ class uring {
   static std::pair<unsigned, unsigned> get_sq_cq_entries(
       unsigned entries, const uring_params<uring_flags> &p) noexcept;
 
-  static constexpr unsigned cqe_shift_from_flags(unsigned flags) noexcept;
-  static constexpr std::size_t cq_size(unsigned cqes) noexcept;
-
   sq<uring_flags> sq_;
-  cq cq_;
+  cq<uring_flags> cq_;
   int ring_fd_ = -1;
 
   unsigned features_;
@@ -191,7 +188,7 @@ void uring<uring_flags>::alloc_huge(const unsigned entries,
   sqes_mem = (sqes_mem + page_size - 1) & ~(page_size - 1);
 
   std::size_t ring_mem = kRingSize;
-  ring_mem += sqes_mem + cq_size(cq_entries);
+  ring_mem += sqes_mem + cq<uring_flags>::cq_size(cq_entries);
 
   const std::size_t mem_used = (ring_mem + page_size - 1) & ~(page_size - 1);
 
@@ -248,7 +245,7 @@ void uring<uring_flags>::alloc_huge(const unsigned entries,
 template <unsigned uring_flags>
 void uring<uring_flags>::mmap(int fd, const uring_params<uring_flags> &p) {
   sq_.ring_sz_ = p.sq_off.array + p.sq_entries * sizeof(unsigned);
-  cq_.ring_sz_ = p.cq_off.cqes + cq_size(p.cq_entries);
+  cq_.ring_sz_ = p.cq_off.cqes + cq<uring_flags>::cq_size(p.cq_entries);
 
   if (p.features & IORING_FEAT_SINGLE_MMAP) {
     sq_.ring_sz_ = cq_.ring_sz_ = std::max(sq_.ring_sz_, cq_.ring_sz_);
@@ -316,18 +313,6 @@ std::pair<unsigned, unsigned> uring<uring_flags>::get_sq_cq_entries(
   }
 
   return {entries, cq_entries};
-}
-
-template <unsigned uring_flags>
-constexpr unsigned uring<uring_flags>::cqe_shift_from_flags(
-    const unsigned flags) noexcept {
-  return !!(flags & IORING_SETUP_CQE32);
-}
-
-template <unsigned uring_flags>
-constexpr std::size_t uring<uring_flags>::cq_size(unsigned cqes) noexcept {
-  cqes <<= cqe_shift_from_flags(uring_flags);
-  return cqes * sizeof(cqe);
 }
 
 }  // namespace liburing
