@@ -42,6 +42,14 @@ class uring {
   [[gnu::cold]] void init(unsigned entries, uring_params<uring_flags> &&p,
                           void *buf = nullptr, std::size_t buf_size = 0);
 
+  [[nodiscard]] int fd() const noexcept { return ring_fd_; }
+
+  // clang-format off
+  [[nodiscard]] unsigned sq_ready() const noexcept { return sq_.ready(); }
+  [[nodiscard]] unsigned sq_space_left() const noexcept { return sq_.space_left(); }
+  [[nodiscard]] sqe *get_sqe() noexcept { return sq_.get_sqe(); }
+  // clang-format on
+
  private:
   void alloc_huge(unsigned entries, uring_params<uring_flags> &p, void *buf,
                   std::size_t buf_size);
@@ -66,7 +74,7 @@ class uring {
 template <unsigned uring_flags>
 uring<uring_flags>::~uring() noexcept {
   if (!(int_flags_ & INT_FLAG_APP_MEM)) {
-    __sys_munmap(sq_.sqes_, sqes_size(sq_.ring_entries_));
+    __sys_munmap(sq_.sqes_, sq<uring_flags>::sqes_size(sq_.ring_entries_));
     munmap();
   }
 
@@ -176,7 +184,7 @@ void uring<uring_flags>::alloc_huge(const unsigned entries,
 
   const std::size_t page_size = get_page_size();
 
-  std::size_t sqes_mem = sqes_size(sq_entries);
+  std::size_t sqes_mem = sq<uring_flags>::sqes_size(sq_entries);
   if (!(uring_flags & IORING_SETUP_NO_SQARRAY)) {
     sqes_mem += sq_entries * sizeof(unsigned);
   }
@@ -267,9 +275,9 @@ void uring<uring_flags>::mmap(int fd, const uring_params<uring_flags> &p) {
     }
   }
 
-  sq_.sqes_ = static_cast<sqe *>(
-      __sys_mmap(nullptr, sqes_size(p.sq_entries), PROT_READ | PROT_WRITE,
-                 MAP_SHARED | MAP_POPULATE, fd, IORING_OFF_SQES));
+  sq_.sqes_ = static_cast<sqe *>(__sys_mmap(
+      nullptr, sq<uring_flags>::sqes_size(p.sq_entries), PROT_READ | PROT_WRITE,
+      MAP_SHARED | MAP_POPULATE, fd, IORING_OFF_SQES));
   if (sq_.sqes_ == MAP_FAILED) [[unlikely]] {
     munmap();
     throw std::system_error{errno, std::system_category(),

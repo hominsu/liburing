@@ -18,8 +18,8 @@ class sq {
 
   void setup_ring_pointers(const uring_params<uring_flags> &p) noexcept;
 
-  [[nodiscard]] unsigned sq_ready() const noexcept;
-  [[nodiscard]] unsigned sq_space_left() const noexcept;
+  [[nodiscard]] unsigned ready() const noexcept;
+  [[nodiscard]] unsigned space_left() const noexcept;
   [[nodiscard]] sqe *get_sqe() noexcept;
   unsigned flush() noexcept;
 
@@ -63,13 +63,13 @@ void sq<uring_flags>::setup_ring_pointers(
 }
 
 template <unsigned uring_flags>
-unsigned sq<uring_flags>::sq_ready() const noexcept {
+unsigned sq<uring_flags>::ready() const noexcept {
   return sqe_tail_ - load_sq_head();
 }
 
 template <unsigned uring_flags>
-unsigned sq<uring_flags>::sq_space_left() const noexcept {
-  return ring_entries_ - sq_ready();
+unsigned sq<uring_flags>::space_left() const noexcept {
+  return ring_entries_ - ready();
 }
 
 template <unsigned uring_flags>
