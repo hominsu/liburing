@@ -45,10 +45,23 @@ class uring {
   [[nodiscard]] int fd() const noexcept { return ring_fd_; }
 
   // clang-format off
+  int submit() noexcept { return submit_and_wait(0); }
+  int submit_and_wait(const unsigned wait_nr) noexcept { return _submit(sq_.flush(), wait_nr, false); }
+  // clang-format on
+
+  // clang-format off
+  [[nodiscard]] int enter_flags() const noexcept { return int_flags_ & INT_FLAGS_MASK; }
+  // clang-format on
+
+  // clang-format off
   [[nodiscard]] unsigned sq_ready() const noexcept { return sq_.ready(); }
   [[nodiscard]] unsigned sq_space_left() const noexcept { return sq_.space_left(); }
   [[nodiscard]] sqe *get_sqe() noexcept { return sq_.get_sqe(); }
   // clang-format on
+
+  bool sq_ring_needs_enter(unsigned submit, unsigned &flags) noexcept;
+  bool cq_ring_needs_flush() noexcept;
+  bool cq_ring_needs_enter() noexcept;
 
  private:
   void alloc_huge(unsigned entries, uring_params<uring_flags> &p, void *buf,
@@ -58,6 +71,8 @@ class uring {
 
   static std::pair<unsigned, unsigned> get_sq_cq_entries(
       unsigned entries, const uring_params<uring_flags> &p) noexcept;
+
+  int _submit(unsigned submitted, unsigned wait_nr, bool getevents) noexcept;
 
   sq<uring_flags> sq_;
   cq<uring_flags> cq_;
@@ -99,15 +114,15 @@ void uring<uring_flags>::init(const unsigned entries,
                               const std::size_t buf_size) {
   assert(ring_fd_ == -1 && "Do not reinit uring");
 
-  if (uring_flags & IORING_SETUP_REGISTERED_FD_ONLY &&
-      !(uring_flags & IORING_SETUP_NO_MMAP)) [[unlikely]] {
+  if constexpr (uring_flags & IORING_SETUP_REGISTERED_FD_ONLY &&
+                !(uring_flags & IORING_SETUP_NO_MMAP)) [[unlikely]] {
     throw std::system_error{
         -EINVAL, std::system_category(),
         "uring()::init, IORING_SETUP_REGISTERED_FD_ONLY only makes sense when "
         "used alongside with IORING_SETUP_NO_MMAP"};
   }
 
-  if (uring_flags & IORING_SETUP_NO_MMAP) {
+  if constexpr (uring_flags & IORING_SETUP_NO_MMAP) {
     alloc_huge(entries, p, buf, buf_size);
     if (buf) {
       int_flags_ |= INT_FLAG_APP_MEM;
@@ -123,7 +138,7 @@ void uring<uring_flags>::init(const unsigned entries,
                             "uring()::__sys_io_uring_setup"};
   }
 
-  if (!(uring_flags & IORING_SETUP_NO_MMAP)) {
+  if constexpr (!(uring_flags & IORING_SETUP_NO_MMAP)) {
     try {
       mmap(fd, p);
     } catch (...) {
@@ -138,14 +153,14 @@ void uring<uring_flags>::init(const unsigned entries,
   /*
    * Directly map SQ slots to SQEs
    */
-  if (!(uring_flags & IORING_SETUP_NO_SQARRAY)) {
+  if constexpr (!(uring_flags & IORING_SETUP_NO_SQARRAY)) {
     for (unsigned *sq_array = sq_.array_, i = 0; i < sq_.ring_entries_; ++i) {
       sq_array[i] = i;
     }
   }
   features_ = p.features;
   ring_fd_ = enter_ring_fd_ = fd;
-  if (uring_flags & IORING_SETUP_REGISTERED_FD_ONLY) {
+  if constexpr (uring_flags & IORING_SETUP_REGISTERED_FD_ONLY) {
     ring_fd_ = -1;
     int_flags_ |= INT_FLAG_REG_RING | INT_FLAG_REG_REG_RING;
   } else {
@@ -156,8 +171,8 @@ void uring<uring_flags>::init(const unsigned entries,
    * IOPOLL always needs to enter, except if SQPOLL is set as well.
    * Use an internal flag to check for this.
    */
-  if ((uring_flags & (IORING_SETUP_IOPOLL | IORING_SETUP_SQPOLL)) ==
-      IORING_SETUP_IOPOLL) {
+  if constexpr ((uring_flags & (IORING_SETUP_IOPOLL | IORING_SETUP_SQPOLL)) ==
+                IORING_SETUP_IOPOLL) {
     int_flags_ |= INT_FLAG_CQ_ENTER;
   }
 }
@@ -167,6 +182,42 @@ void uring<uring_flags>::init(const unsigned entries,
                               uring_params<uring_flags> &&p, void *buf,
                               const std::size_t buf_size) {
   init(entries, p, buf, buf_size);
+}
+
+template <unsigned uring_flags>
+bool uring<uring_flags>::sq_ring_needs_enter(const unsigned submit,
+                                             unsigned &flags) noexcept {
+  if (!submit) {
+    return false;
+  }
+
+  if constexpr (!(uring_flags & IORING_SETUP_SQPOLL)) {
+    return true;
+  }
+
+  /*
+   * Ensure the kernel can see the store to the SQ tail before we read
+   * the flags.
+   */
+  io_uring_smp_mb();
+
+  if (IO_URING_READ_ONCE(*sq_.kflags) & IORING_SQ_NEED_WAKEUP) [[unlikely]] {
+    flags |= IORING_ENTER_SQ_WAKEUP;
+    return true;
+  }
+
+  return false;
+}
+
+template <unsigned uring_flags>
+bool uring<uring_flags>::cq_ring_needs_flush() noexcept {
+  return IO_URING_READ_ONCE(*sq_.kflags) &
+         (IORING_SQ_CQ_OVERFLOW | IORING_SQ_TASKRUN);
+}
+
+template <unsigned uring_flags>
+bool uring<uring_flags>::cq_ring_needs_enter() noexcept {
+  return int_flags_ & INT_FLAG_CQ_ENTER || cq_ring_needs_flush();
 }
 
 template <unsigned uring_flags>
@@ -182,7 +233,7 @@ void uring<uring_flags>::alloc_huge(const unsigned entries,
   const std::size_t page_size = get_page_size();
 
   std::size_t sqes_mem = sq<uring_flags>::sqes_size(sq_entries);
-  if (!(uring_flags & IORING_SETUP_NO_SQARRAY)) {
+  if constexpr (!(uring_flags & IORING_SETUP_NO_SQARRAY)) {
     sqes_mem += sq_entries * sizeof(unsigned);
   }
   sqes_mem = (sqes_mem + page_size - 1) & ~(page_size - 1);
@@ -302,7 +353,7 @@ std::pair<unsigned, unsigned> uring<uring_flags>::get_sq_cq_entries(
   }
   entries = std::bit_ceil(entries);
 
-  if (uring_flags & IORING_SETUP_CQSIZE) {
+  if constexpr (uring_flags & IORING_SETUP_CQSIZE) {
     if (!p.cq_entries || p.cq_entries > kKernelMaxCqEntries ||
         p.cq_entries < entries) {
       return {0, 0};
@@ -313,6 +364,22 @@ std::pair<unsigned, unsigned> uring<uring_flags>::get_sq_cq_entries(
   }
 
   return {entries, cq_entries};
+}
+
+template <unsigned uring_flags>
+int uring<uring_flags>::_submit(const unsigned submitted, unsigned wait_nr,
+                                bool getevents) noexcept {
+  const bool cq_needs_enter = getevents || wait_nr || cq_ring_needs_enter();
+  unsigned flags = enter_flags();
+
+  if (sq_ring_needs_enter(submitted, &flags) || cq_needs_enter) {
+    if (cq_needs_enter) {
+      flags |= IORING_ENTER_GETEVENTS;
+    }
+    __sys_io_uring_enter(enter_ring_fd_, submitted, wait_nr, flags, nullptr);
+  }
+
+  return static_cast<int>(submitted);
 }
 
 }  // namespace liburing

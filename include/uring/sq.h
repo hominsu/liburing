@@ -90,7 +90,7 @@ unsigned sq<uring_flags>::flush() noexcept {
 
   if (sqe_head_ != tail) {
     sqe_head_ = tail;
-    if (!(uring_flags & IORING_SETUP_SQPOLL)) {
+    if constexpr (!(uring_flags & IORING_SETUP_SQPOLL)) {
       *ktail_ = tail;
     } else {
       io_uring_smp_store_release(ktail_, tail);
