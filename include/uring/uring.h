@@ -1,13 +1,18 @@
 #ifndef URING_URING_H
 #define URING_URING_H
 
+#include <sys/mman.h>
+
 #include <cassert>
+#include <cstdint>
 #include <cstring>
+#include <span>
 #include <system_error>
 
 #include "uring/cq.h"
 #include "uring/int_flags.h"
 #include "uring/io_uring.h"
+#include "uring/lib.h"
 #include "uring/params.h"
 #include "uring/sq.h"
 #include "uring/syscall.h"
@@ -16,6 +21,11 @@ namespace liburing {
 
 template <unsigned uring_flags = 0>
 class uring {
+  static constexpr std::size_t kKernelMaxEntries = 32768;
+  static constexpr std::size_t kKernelMaxCqEntries = 2 * kKernelMaxEntries;
+  static constexpr std::size_t kRingSize = 64;
+  static constexpr std::size_t kHugePageSize = 2 * 1024 * 1024;
+
  public:
   explicit uring() noexcept = default;
   ~uring() noexcept;
@@ -25,20 +35,26 @@ class uring {
   uring &operator=(const uring &) = delete;
   uring &operator=(uring &&) = delete;
 
-  void init(unsigned entries);
-  void init(unsigned entries, uring_params<uring_flags> &p);
-  void init(unsigned entries, uring_params<uring_flags> &&p);
+  [[gnu::cold]] void init(unsigned entries, void *buf = nullptr,
+                          std::size_t buf_size = 0);
+  [[gnu::cold]] void init(unsigned entries, uring_params<uring_flags> &p,
+                          void *buf = nullptr, std::size_t buf_size = 0);
+  [[gnu::cold]] void init(unsigned entries, uring_params<uring_flags> &&p,
+                          void *buf = nullptr, std::size_t buf_size = 0);
 
  private:
+  void alloc_huge(unsigned entries, uring_params<uring_flags> &p, void *buf,
+                  std::size_t buf_size);
   void mmap(int fd, const uring_params<uring_flags> &p);
   void munmap() noexcept;
 
-  static constexpr unsigned sqe_shift_from_flags(unsigned flags) noexcept;
-  static constexpr std::size_t sqes_size(unsigned sqes) noexcept;
+  static std::pair<unsigned, unsigned> get_sq_cq_entries(
+      unsigned entries, const uring_params<uring_flags> &p) noexcept;
+
   static constexpr unsigned cqe_shift_from_flags(unsigned flags) noexcept;
   static constexpr std::size_t cq_size(unsigned cqes) noexcept;
 
-  sq sq_;
+  sq<uring_flags> sq_;
   cq cq_;
   int ring_fd_ = -1;
 
@@ -54,44 +70,171 @@ uring<uring_flags>::~uring() noexcept {
     munmap();
   }
 
+  /*
+   * Not strictly required, but frees up the slot we used now rather
+   * than at process exit time.
+   */
+  if (int_flags_ & INT_FLAG_REG_RING) {
+    // TODO: io_uring_unregister_ring_fd(ring);
+  }
   if (ring_fd_ != -1) {
     __sys_close(ring_fd_);
   }
 }
 
 template <unsigned uring_flags>
-void uring<uring_flags>::init(const unsigned entries) {
-  init(entries, uring_params<uring_flags>{});
+void uring<uring_flags>::init(const unsigned entries, void *buf,
+                              const std::size_t buf_size) {
+  init(entries, uring_params<uring_flags>{}, buf, buf_size);
 }
 
 template <unsigned uring_flags>
 void uring<uring_flags>::init(const unsigned entries,
-                              uring_params<uring_flags> &p) {
+                              uring_params<uring_flags> &p, void *buf,
+                              const std::size_t buf_size) {
   assert(ring_fd_ == -1 && "Do not reinit uring");
+
+  if (uring_flags & IORING_SETUP_REGISTERED_FD_ONLY &&
+      !(uring_flags & IORING_SETUP_NO_MMAP)) [[unlikely]] {
+    throw std::system_error{
+        -EINVAL, std::system_category(),
+        "uring()::init, IORING_SETUP_REGISTERED_FD_ONLY only makes sense when "
+        "used alongside with IORING_SETUP_NO_MMAP"};
+  }
+
+  if (uring_flags & IORING_SETUP_NO_MMAP) {
+    alloc_huge(entries, p, buf, buf_size);
+    if (buf) {
+      int_flags_ |= INT_FLAG_APP_MEM;
+    }
+  }
 
   const int fd =
       __sys_io_uring_setup(entries, static_cast<io_uring_params *>(&p));
   if (fd < 0) [[unlikely]] {
+    __sys_munmap(sq_.sqes_, 1);
+    munmap();
     throw std::system_error{-fd, std::system_category(),
                             "uring()::__sys_io_uring_setup"};
   }
 
-  ring_fd_ = enter_ring_fd_ = fd;
-  features_ = p.features;
-  int_flags_ = 0;
+  if (!(uring_flags & IORING_SETUP_NO_MMAP)) {
+    try {
+      mmap(fd, p);
+    } catch (...) {
+      __sys_close(fd);
+      std::rethrow_exception(std::current_exception());
+    }
+  }
 
-  try {
-    mmap(fd, p);
-  } catch (...) {
-    __sys_close(fd);
-    std::rethrow_exception(std::current_exception());
+  sq_.setup_ring_pointers(p);
+  cq_.setup_ring_pointers(p);
+
+  /*
+   * Directly map SQ slots to SQEs
+   */
+  if (!(uring_flags & IORING_SETUP_NO_SQARRAY)) {
+    for (unsigned *sq_array = sq_.array_, i = 0; i < sq_.ring_entries_; ++i) {
+      sq_array[i] = i;
+    }
+  }
+  features_ = p.features;
+  ring_fd_ = enter_ring_fd_ = fd;
+  if (uring_flags & IORING_SETUP_REGISTERED_FD_ONLY) {
+    ring_fd_ = -1;
+    int_flags_ |= INT_FLAG_REG_RING | INT_FLAG_REG_REG_RING;
+  } else {
+    ring_fd_ = fd;
+  }
+
+  /*
+   * IOPOLL always needs to enter, except if SQPOLL is set as well.
+   * Use an internal flag to check for this.
+   */
+  if ((uring_flags & (IORING_SETUP_IOPOLL | IORING_SETUP_SQPOLL)) ==
+      IORING_SETUP_IOPOLL) {
+    int_flags_ |= INT_FLAG_CQ_ENTER;
   }
 }
 
 template <unsigned uring_flags>
 void uring<uring_flags>::init(const unsigned entries,
-                              uring_params<uring_flags> &&p) {
-  init(entries, p);
+                              uring_params<uring_flags> &&p, void *buf,
+                              const std::size_t buf_size) {
+  init(entries, p, buf, buf_size);
+}
+
+template <unsigned uring_flags>
+void uring<uring_flags>::alloc_huge(const unsigned entries,
+                                    uring_params<uring_flags> &p, void *buf,
+                                    std::size_t buf_size) {
+  const auto [sq_entries, cq_entries] = get_sq_cq_entries(entries, p);
+  if (!sq_entries || !cq_entries) [[unlikely]] {
+    throw std::system_error{-EINVAL, std::system_category(),
+                            "uring::get_sq_cq_entries"};
+  }
+
+  const std::size_t page_size = get_page_size();
+
+  std::size_t sqes_mem = sqes_size(sq_entries);
+  if (!(uring_flags & IORING_SETUP_NO_SQARRAY)) {
+    sqes_mem += sq_entries * sizeof(unsigned);
+  }
+  sqes_mem = (sqes_mem + page_size - 1) & ~(page_size - 1);
+
+  std::size_t ring_mem = kRingSize;
+  ring_mem += sqes_mem + cq_size(cq_entries);
+
+  const std::size_t mem_used = (ring_mem + page_size - 1) & ~(page_size - 1);
+
+  void *ptr;
+  if (buf) {
+    if (mem_used > buf_size) [[unlikely]] {
+      throw std::system_error{-ENOMEM, std::system_category(),
+                              "uring()::alloc_huge"};
+    }
+
+    ptr = buf;
+  } else {
+    if (sqes_mem > kHugePageSize || ring_mem > kHugePageSize) [[unlikely]] {
+      throw std::system_error{-ENOMEM, std::system_category(),
+                              "uring()::alloc_huge"};
+    }
+
+    int map_hugetlb = sqes_mem > page_size ? MAP_HUGETLB : 0;
+    buf_size = map_hugetlb ? kHugePageSize : page_size;
+
+    ptr = __sys_mmap(nullptr, buf_size, PROT_READ | PROT_WRITE,
+                     MAP_SHARED | MAP_ANONYMOUS | map_hugetlb, -1, 0);
+    if (ptr == MAP_FAILED) [[unlikely]] {
+      throw std::system_error{errno, std::system_category(), "ptr MAP_FAILED"};
+    }
+  }
+
+  sq_.sqes_ = static_cast<sqe *>(ptr);
+  if (mem_used <= buf_size) {
+    sq_.ring_ptr_ = sq_.sqes_ + sqes_mem;
+    sq_.ring_sz_ = 0;
+    cq_.ring_sz_ = 0;
+  } else {
+    int map_hugetlb = sqes_mem > page_size ? MAP_HUGETLB : 0;
+    buf_size = map_hugetlb ? kHugePageSize : page_size;
+
+    ptr = __sys_mmap(nullptr, buf_size, PROT_READ | PROT_WRITE,
+                     MAP_SHARED | MAP_ANONYMOUS | map_hugetlb, -1, 0);
+    if (ptr == MAP_FAILED) [[unlikely]] {
+      __sys_munmap(sq_.sqes_, 1);
+      throw std::system_error{errno, std::system_category(), "ptr MAP_FAILED"};
+    }
+
+    sq_.ring_ptr_ = ptr;
+    sq_.ring_sz_ = buf_size;
+    cq_.ring_sz_ = 0;
+  }
+
+  cq_.ring_ptr_ = sq_.ring_ptr_;
+  p.sq_off.user_addr = reinterpret_cast<uint64_t>(sq_.sqes_);
+  p.cq_off.user_addr = reinterpret_cast<uint64_t>(sq_.ring_ptr_);
 }
 
 template <unsigned uring_flags>
@@ -132,9 +275,6 @@ void uring<uring_flags>::mmap(int fd, const uring_params<uring_flags> &p) {
     throw std::system_error{errno, std::system_category(),
                             "sq.sqes MAP_FAILED"};
   }
-
-  sq_.setup_ring_pointers(p);
-  cq_.setup_ring_pointers(p);
 }
 
 template <unsigned uring_flags>
@@ -148,15 +288,26 @@ void uring<uring_flags>::munmap() noexcept {
 }
 
 template <unsigned uring_flags>
-constexpr unsigned uring<uring_flags>::sqe_shift_from_flags(
-    const unsigned flags) noexcept {
-  return !!(flags & IORING_SETUP_SQE128);
-}
+std::pair<unsigned, unsigned> uring<uring_flags>::get_sq_cq_entries(
+    unsigned entries, const uring_params<uring_flags> &p) noexcept {
+  unsigned cq_entries;
 
-template <unsigned uring_flags>
-constexpr std::size_t uring<uring_flags>::sqes_size(unsigned sqes) noexcept {
-  sqes <<= sqe_shift_from_flags(uring_flags);
-  return sqes * sizeof(sqe);
+  if (!entries || entries > kKernelMaxEntries) {
+    return {0, 0};
+  }
+  entries = std::bit_ceil(entries);
+
+  if (uring_flags & IORING_SETUP_CQSIZE) {
+    if (!p.cq_entries || p.cq_entries > kKernelMaxCqEntries ||
+        p.cq_entries < entries) {
+      return {0, 0};
+    }
+    cq_entries = std::bit_ceil(p.cq_entries);
+  } else {
+    cq_entries = 2 * entries;
+  }
+
+  return {entries, cq_entries};
 }
 
 template <unsigned uring_flags>
