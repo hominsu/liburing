@@ -14,11 +14,11 @@ class cq {
   friend class uring;
 
   struct get_data {
-    unsigned submit;
-    unsigned wait_nr;
-    unsigned get_flags;
-    int sz;
-    void *arg;
+    unsigned submit{};
+    unsigned wait_nr{};
+    unsigned get_flags{};
+    int sz{};
+    void *arg = nullptr;
   };
 
   cq() noexcept = default;
@@ -33,16 +33,16 @@ class cq {
   static constexpr std::size_t cq_size(unsigned cqes) noexcept;
 
  private:
-  unsigned *khead_;
-  unsigned *ktail_;
-  unsigned ring_mask_;
-  unsigned ring_entries_;
-  unsigned *kflags_;
-  unsigned *koverflow_;
-  cqe *cqes_;
+  unsigned *khead_ = nullptr;
+  unsigned *ktail_ = nullptr;
+  unsigned ring_mask_{};
+  unsigned ring_entries_{};
+  unsigned *kflags_ = nullptr;
+  unsigned *koverflow_ = nullptr;
+  cqe *cqes_ = nullptr;
 
-  std::size_t ring_sz_;
-  void *ring_ptr_;
+  std::size_t ring_sz_{};
+  void *ring_ptr_ = nullptr;
 };
 
 template <unsigned uring_flags>

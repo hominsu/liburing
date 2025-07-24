@@ -30,20 +30,20 @@ class sq {
  private:
   [[nodiscard]] unsigned load_sq_head() const noexcept;
 
-  unsigned *khead_;
-  unsigned *ktail_;
-  unsigned ring_mask_;
-  unsigned ring_entries_;
-  unsigned *kflags_;
-  unsigned *kdropped_;
-  unsigned *array_;
-  sqe *sqes_;
+  unsigned *khead_ = nullptr;
+  unsigned *ktail_ = nullptr;
+  unsigned ring_mask_{};
+  unsigned ring_entries_{};
+  unsigned *kflags_ = nullptr;
+  unsigned *kdropped_ = nullptr;
+  unsigned *array_ = nullptr;
+  sqe *sqes_ = nullptr;
 
-  unsigned sqe_head_;
-  unsigned sqe_tail_;
+  unsigned sqe_head_{};
+  unsigned sqe_tail_{};
 
-  std::size_t ring_sz_;
-  void *ring_ptr_;
+  std::size_t ring_sz_{};
+  void *ring_ptr_ = nullptr;
 };
 
 template <unsigned uring_flags>
