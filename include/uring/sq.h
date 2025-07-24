@@ -23,12 +23,12 @@ class sq {
   [[nodiscard]] sqe *get_sqe() noexcept;
   unsigned flush() noexcept;
 
- private:
-  [[nodiscard]] unsigned load_sq_head() const noexcept;
-
   static constexpr unsigned sqe_shift_from_flags(unsigned flags) noexcept;
   static constexpr unsigned sqe_shift() noexcept;
   static constexpr std::size_t sqes_size(unsigned sqes) noexcept;
+
+ private:
+  [[nodiscard]] unsigned load_sq_head() const noexcept;
 
   unsigned *khead_;
   unsigned *ktail_;
@@ -101,14 +101,6 @@ unsigned sq<uring_flags>::flush() noexcept {
 }
 
 template <unsigned uring_flags>
-unsigned sq<uring_flags>::load_sq_head() const noexcept {
-  if constexpr (uring_flags & IORING_SETUP_SQPOLL) {
-    return io_uring_smp_load_acquire(khead_);
-  }
-  return *khead_;
-}
-
-template <unsigned uring_flags>
 constexpr unsigned sq<uring_flags>::sqe_shift_from_flags(
     const unsigned flags) noexcept {
   return !!(flags & IORING_SETUP_SQE128);
@@ -123,6 +115,14 @@ template <unsigned uring_flags>
 constexpr std::size_t sq<uring_flags>::sqes_size(unsigned sqes) noexcept {
   sqes <<= sqe_shift_from_flags(uring_flags);
   return sqes * sizeof(sqe);
+}
+
+template <unsigned uring_flags>
+unsigned sq<uring_flags>::load_sq_head() const noexcept {
+  if constexpr (uring_flags & IORING_SETUP_SQPOLL) {
+    return io_uring_smp_load_acquire(khead_);
+  }
+  return *khead_;
 }
 
 }  // namespace liburing

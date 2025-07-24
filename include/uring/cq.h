@@ -1,6 +1,7 @@
 #ifndef URING_CQ_H
 #define URING_CQ_H
 
+#include "uring/barier.h"
 #include "uring/cqe.h"
 #include "uring/params.h"
 
@@ -17,7 +18,6 @@ class cq {
     unsigned wait_nr;
     unsigned get_flags;
     int sz;
-    int has_ts;
     void *arg;
   };
 
@@ -26,10 +26,13 @@ class cq {
 
   void setup_ring_pointers(const uring_params<uring_flags> &p) noexcept;
 
- private:
+  void advance(unsigned nr) noexcept;
+
   static constexpr unsigned cqe_shift_from_flags(unsigned flags) noexcept;
+  static constexpr unsigned cqe_shift() noexcept;
   static constexpr std::size_t cq_size(unsigned cqes) noexcept;
 
+ private:
   unsigned *khead_;
   unsigned *ktail_;
   unsigned ring_mask_;
@@ -43,7 +46,8 @@ class cq {
 };
 
 template <unsigned uring_flags>
-void cq<uring_flags>::setup_ring_pointers(const uring_params<uring_flags> &p) noexcept {
+void cq<uring_flags>::setup_ring_pointers(
+    const uring_params<uring_flags> &p) noexcept {
   const auto &off = p.cq_off;
 
   // clang-format off
@@ -58,9 +62,21 @@ void cq<uring_flags>::setup_ring_pointers(const uring_params<uring_flags> &p) no
 }
 
 template <unsigned uring_flags>
+void cq<uring_flags>::advance(const unsigned nr) noexcept {
+  if (nr) [[likely]] {
+    io_uring_smp_store_release(khead_, *khead_ + nr);
+  }
+}
+
+template <unsigned uring_flags>
 constexpr unsigned cq<uring_flags>::cqe_shift_from_flags(
     const unsigned flags) noexcept {
   return !!(flags & IORING_SETUP_CQE32);
+}
+
+template <unsigned uring_flags>
+constexpr unsigned cq<uring_flags>::cqe_shift() noexcept {
+  return cqe_shift_from_flags(uring_flags);
 }
 
 template <unsigned uring_flags>

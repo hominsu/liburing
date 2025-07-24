@@ -6,7 +6,6 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
-#include <span>
 #include <system_error>
 
 #include "uring/cq.h"
@@ -25,6 +24,13 @@ class uring {
   static constexpr std::size_t kKernelMaxCqEntries = 2 * kKernelMaxEntries;
   static constexpr std::size_t kRingSize = 64;
   static constexpr std::size_t kHugePageSize = 2 * 1024 * 1024;
+  static constexpr uint64_t LIBURING_UDATA_TIMEOUT = -1ULL;
+
+  struct _peek_return_type {
+    const cqe *_cqe = nullptr;
+    unsigned nr_available{};
+    int res{};
+  };
 
  public:
   explicit uring() noexcept = default;
@@ -59,6 +65,13 @@ class uring {
   [[nodiscard]] sqe *get_sqe() noexcept { return sq_.get_sqe(); }
   // clang-format on
 
+  int get_cqe(const cqe *(&cqe_ptr), unsigned submit, unsigned wait_nr,
+              sigset_t *sigmask) noexcept;
+  int wait_cqe_nr(const cqe *(&cqe_ptr), unsigned wait_nr) noexcept;
+  int wait_cqe(const cqe *(&cqe_ptr)) noexcept;
+  int peek_cqe(const cqe *(&cqe_ptr)) noexcept;
+  void seen_cqe(const cqe *cqe) noexcept;
+
   bool sq_ring_needs_enter(unsigned submit, unsigned &flags) noexcept;
   bool cq_ring_needs_flush() noexcept;
   bool cq_ring_needs_enter() noexcept;
@@ -73,6 +86,12 @@ class uring {
       unsigned entries, const uring_params<uring_flags> &p) noexcept;
 
   int _submit(unsigned submitted, unsigned wait_nr, bool getevents) noexcept;
+
+  _peek_return_type _peek_cqe() noexcept;
+
+  template <bool has_ts>
+  int _get_cqe(const cqe *(&cqe_ptr),
+               typename cq<uring_flags>::get_data &data) noexcept;
 
   sq<uring_flags> sq_;
   cq<uring_flags> cq_;
@@ -185,6 +204,51 @@ void uring<uring_flags>::init(const unsigned entries,
 }
 
 template <unsigned uring_flags>
+int uring<uring_flags>::get_cqe(const cqe *(&cqe_ptr), unsigned submit,
+                                unsigned wait_nr, sigset_t *sigmask) noexcept {
+  typename cq<uring_flags>::get_data data{
+      .submit = submit,
+      .wait_nr = wait_nr,
+      .get_flags = 0,
+      .sz = _NSIG / 8,
+      .arg = sigmask,
+  };
+  return _get_cqe<false>(cqe_ptr, data);
+}
+
+template <unsigned uring_flags>
+int uring<uring_flags>::wait_cqe_nr(const cqe *(&cqe_ptr),
+                                    const unsigned wait_nr) noexcept {
+  return get_cqe(cqe_ptr, 0, wait_nr, nullptr);
+}
+
+template <unsigned uring_flags>
+int uring<uring_flags>::wait_cqe(const cqe *(&cqe_ptr)) noexcept {
+  auto [cqe, nr_available, res] = _peek_cqe();
+  if (!res && cqe) {
+    cqe_ptr = cqe;
+    return 0;
+  }
+  return wait_cqe_nr(cqe_ptr, 1);
+}
+
+template <unsigned uring_flags>
+int uring<uring_flags>::peek_cqe(const cqe *(&cqe_ptr)) noexcept {
+  auto [cqe, nr_available, res] = _peek_cqe();
+  if (!res && cqe) {
+    cqe_ptr = cqe;
+    return 0;
+  }
+  return wait_cqe_nr(cqe_ptr, 0);
+}
+
+template <unsigned uring_flags>
+void uring<uring_flags>::seen_cqe([[maybe_unused]] const cqe *cqe) noexcept {
+  assert(cqe);
+  cq_.advance(1);
+}
+
+template <unsigned uring_flags>
 bool uring<uring_flags>::sq_ring_needs_enter(const unsigned submit,
                                              unsigned &flags) noexcept {
   if (!submit) {
@@ -201,7 +265,7 @@ bool uring<uring_flags>::sq_ring_needs_enter(const unsigned submit,
    */
   io_uring_smp_mb();
 
-  if (IO_URING_READ_ONCE(*sq_.kflags) & IORING_SQ_NEED_WAKEUP) [[unlikely]] {
+  if (IO_URING_READ_ONCE(*sq_.kflags_) & IORING_SQ_NEED_WAKEUP) [[unlikely]] {
     flags |= IORING_ENTER_SQ_WAKEUP;
     return true;
   }
@@ -211,7 +275,7 @@ bool uring<uring_flags>::sq_ring_needs_enter(const unsigned submit,
 
 template <unsigned uring_flags>
 bool uring<uring_flags>::cq_ring_needs_flush() noexcept {
-  return IO_URING_READ_ONCE(*sq_.kflags) &
+  return IO_URING_READ_ONCE(*sq_.kflags_) &
          (IORING_SQ_CQ_OVERFLOW | IORING_SQ_TASKRUN);
 }
 
@@ -372,14 +436,118 @@ int uring<uring_flags>::_submit(const unsigned submitted, unsigned wait_nr,
   const bool cq_needs_enter = getevents || wait_nr || cq_ring_needs_enter();
   unsigned flags = enter_flags();
 
-  if (sq_ring_needs_enter(submitted, &flags) || cq_needs_enter) {
+  if (sq_ring_needs_enter(submitted, flags) || cq_needs_enter) {
     if (cq_needs_enter) {
       flags |= IORING_ENTER_GETEVENTS;
     }
-    __sys_io_uring_enter(enter_ring_fd_, submitted, wait_nr, flags, nullptr);
+    return __sys_io_uring_enter(enter_ring_fd_, submitted, wait_nr, flags,
+                                nullptr);
   }
 
   return static_cast<int>(submitted);
+}
+
+template <unsigned uring_flags>
+typename uring<uring_flags>::_peek_return_type
+uring<uring_flags>::_peek_cqe() noexcept {
+  _peek_return_type ret;
+
+  while (true) {
+    const unsigned tail = io_uring_smp_load_acquire(cq_.ktail_);
+    const unsigned head = *cq_.khead_;
+
+    ret._cqe = nullptr;
+    ret.nr_available = tail - head;
+    if (!ret.nr_available) {
+      break;
+    }
+
+    ret._cqe =
+        &cq_.cqes_[(head & cq_.ring_mask_) << cq<uring_flags>::cqe_shift()];
+    if (!(features_ & IORING_FEAT_EXT_ARG) &&
+        ret._cqe->user_data == LIBURING_UDATA_TIMEOUT) [[unlikely]] {
+      ret.res = ret._cqe->res < 0 ? ret._cqe->res : 0;
+      cq_.advance(1);
+      if (!ret.res) {
+        continue;
+      }
+      ret._cqe = nullptr;
+    }
+
+    break;
+  }
+
+  return ret;
+}
+
+template <unsigned uring_flags>
+template <bool has_ts>
+int uring<uring_flags>::_get_cqe(
+    const cqe *(&cqe_ptr), typename cq<uring_flags>::get_data &data) noexcept {
+  _peek_return_type peek_ret;
+  bool looped = false;
+  int err = 0;
+
+  while (true) {
+    bool need_enter = false;
+    unsigned flags = enter_flags();
+
+    peek_ret = _peek_cqe();
+    auto [cqe, nr_available, res] = peek_ret;
+    if (res) [[unlikely]] {
+      err = !err ? res : err;
+      break;
+    }
+
+    if (!cqe && !data.wait_nr && !data.submit) {
+      /*
+       * If we already looped once, we already entered
+       * the kernel. Since there's nothing to submit or
+       * wait for, don't keep retrying.
+       */
+      if (looped || !cq_ring_needs_enter()) {
+        err = !err ? -EAGAIN : err;
+        break;
+      }
+      need_enter = true;
+    }
+
+    if (data.wait_nr > nr_available || need_enter) {
+      flags |= IORING_ENTER_GETEVENTS | data.get_flags;
+      need_enter = true;
+    }
+    if (sq_ring_needs_enter(data.submit, flags)) need_enter = true;
+    if (!need_enter) {
+      break;
+    }
+    if constexpr (has_ts) {
+      if (looped) {
+        io_uring_getevents_arg *arg = data.arg;
+        if (!cqe && arg->ts && !err) {
+          err = -ETIME;
+        }
+        break;
+      }
+    }
+
+    int ret = __sys_io_uring_enter2(enter_ring_fd_, data.submit, data.wait_nr,
+                                    flags, data.arg, data.sz);
+    if (ret < 0) [[unlikely]] {
+      err = !err ? ret : err;
+      break;
+    }
+    data.submit -= ret;
+    if (cqe) {
+      break;
+    }
+    if (!looped) {
+      looped = true;
+      err = ret;
+    }
+  }
+
+  cqe_ptr = peek_ret._cqe;
+  return err;
 }
 
 }  // namespace liburing
