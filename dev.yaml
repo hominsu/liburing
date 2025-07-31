@@ -1,0 +1,20 @@
+packages:
+  - build-essential
+  - cmake
+  - gdb
+
+groups:
+  - dev
+
+runcmd:
+  - |
+    # add `ubuntu` to the `dev` group
+    adduser ubuntu dev
+  - |
+    # apt cleanup
+    apt-get autoremove -y
+
+ssh_authorized_keys:
+  - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB52VOuZJdntf2YWS3UOH1GiHKv43F6Xx3wBW+iq97rM
+
+final_message: "The system is finally up, after $UPTIME seconds"

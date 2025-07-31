@@ -1,3 +1,5 @@
+#include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/uio.h>
 
 #include <cstdio>
@@ -9,7 +11,6 @@
 #include "uring/uring.h"
 
 constexpr std::size_t kEntries = 8;
-constexpr std::size_t kBlockSize = 1 << 12;
 
 struct io_data {
   std::size_t size;
@@ -18,16 +19,19 @@ struct io_data {
 
 template <unsigned uring_flags>
 io_data* submit(liburing::uring<uring_flags>& ring, int fd,
-                const std::size_t size) {
-  const std::size_t blocks = (size + kBlockSize - 1) / kBlockSize;
+                const struct stat& st) {
+  const std::size_t size = st.st_size;
+  const std::size_t block_size = st.st_blksize;
+
+  const std::size_t blocks = (size + block_size - 1) / block_size;
   auto* data =
       static_cast<io_data*>(malloc(sizeof(io_data) + blocks * sizeof(iovec)));
   data->size = size;
 
   for (std::size_t s = size, i = 0; s != 0; ++i) {
-    const std::size_t to_read = std::min(s, kBlockSize);
+    const std::size_t to_read = std::min(s, block_size);
     data->iovecs[i].iov_len = to_read;
-    if (posix_memalign(&data->iovecs[i].iov_base, kBlockSize, kBlockSize)) {
+    if (posix_memalign(&data->iovecs[i].iov_base, block_size, block_size)) {
       throw std::system_error{errno, std::system_category(), "posix_memalign"};
     }
     s -= to_read;
@@ -46,12 +50,14 @@ io_data* submit(liburing::uring<uring_flags>& ring, int fd,
 }
 
 template <unsigned uring_flags>
-void print_result(liburing::uring<uring_flags>& ring) {
+void print_result(liburing::uring<uring_flags>& ring, const struct stat& st) {
+  const std::size_t block_size = st.st_blksize;
+
   const liburing::cqe* cqe;
   ring.wait_cqe(cqe);
 
   const auto* data = reinterpret_cast<io_data*>(cqe->user_data);
-  const std::size_t blocks = (data->size + kBlockSize - 1) / kBlockSize;
+  const std::size_t blocks = (data->size + block_size - 1) / block_size;
   if (writev(STDOUT_FILENO, data->iovecs, static_cast<int>(blocks)) == -1) {
     throw std::system_error{errno, std::system_category(), "posix_memalign"};
   }
@@ -69,16 +75,29 @@ int main(const int argc, char* argv[]) {
   ring.init(kEntries);
 
   const auto path = std::filesystem::path(argv[1]);
-  int fd = open(path.c_str(), O_RDONLY | O_DIRECT);
+  int fd = open(path.c_str(), O_RDONLY);
   if (fd < 0) {
     throw std::system_error{errno, std::system_category(), "open"};
+  }
+
+  struct stat st{};
+  if (fstat(fd, &st) < 0) {
+    throw std::system_error{errno, std::system_category(), "fstat"};
+  }
+
+  if (S_ISBLK(st.st_mode)) {
+    off_t bytes;
+    if (ioctl(fd, BLKGETSIZE64, &bytes) != 0) {
+      throw std::system_error{errno, std::system_category(), "ioctl"};
+    }
+    st.st_size = bytes;
   }
 
   io_data* data = nullptr;
 
   try {
-    data = submit(ring, fd, std::filesystem::file_size(path));
-    print_result(ring);
+    data = submit(ring, fd, st);
+    print_result(ring, st);
   } catch (const std::system_error& e) {
     std::cerr << e.what() << "\n" << e.code() << "\n";
   } catch (const std::exception& e) {

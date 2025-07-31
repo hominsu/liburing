@@ -16,7 +16,7 @@ struct epoll_event;
 
 namespace liburing {
 
-class sqe final : io_uring_sqe {
+class sqe final : public io_uring_sqe {
  public:
   void set_data(void *data) noexcept {
     this->user_data = reinterpret_cast<uint64_t>(data);
