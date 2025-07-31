@@ -10,10 +10,25 @@ constexpr std::size_t kQueueDepth = 64;
 constexpr std::size_t kBatchSize = 32 * 1024;
 
 enum class event_type : uint8_t {
-  NOP = 0,
+  NOP,
   READ,
   WRITE,
 };
+
+event_type& operator++(event_type& type) {
+  switch (type) {
+    case event_type::NOP:
+      type = event_type::READ;
+      break;
+    case event_type::READ:
+      type = event_type::WRITE;
+      break;
+    case event_type::WRITE:
+      type = event_type::NOP;
+      break;
+  }
+  return type;
+}
 
 struct io_data {
   explicit io_data(event_type type, std::size_t size, off_t off = 0)
@@ -59,7 +74,7 @@ static off_t file_size(const int fd) {
 
 template <unsigned uring_flags>
 static void rw_pair(liburing::uring<uring_flags>& ring, std::size_t size,
-                    off_t off, const int in_fd, const int out_fd) {
+                    const off_t off, const int in_fd, const int out_fd) {
   auto data = new io_data(event_type::NOP, size, off);
   liburing::sqe* sqe = nullptr;
 
@@ -82,8 +97,8 @@ static void rw_pair(liburing::uring<uring_flags>& ring, std::size_t size,
 template <unsigned uring_flags>
 static void handle_cqe(liburing::uring<uring_flags>& ring, uint64_t& inflight,
                        liburing::cqe* cqe) {
-  auto data = reinterpret_cast<io_data*>(cqe->user_data);
-  data->type = event_type::WRITE;
+  const auto data = reinterpret_cast<io_data*>(cqe->user_data);
+  ++data->type;
 
   if (cqe->res < 0) {
     if (cqe->res == -ECANCELED) {
@@ -95,7 +110,10 @@ static void handle_cqe(liburing::uring<uring_flags>& ring, uint64_t& inflight,
   }
 
   if (data->type == event_type::WRITE) {
+    delete data;
   }
+
+  ring.seen_cqe(cqe);
 }
 
 int main(const int argc, char* argv[]) {
