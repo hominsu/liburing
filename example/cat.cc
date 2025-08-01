@@ -12,7 +12,7 @@ constexpr std::size_t kQueueDepth = 2;
 constexpr std::size_t kBatchSize = 64 * 1024;
 
 struct io_data {
-  explicit io_data(std::size_t size, off_t off = 0)
+  explicit io_data(const std::size_t size, const off_t off = 0)
       : iov({.iov_len = size}), off(off) {
     iov.iov_base = malloc(size);
   }
@@ -162,7 +162,7 @@ int main(const int argc, char* argv[]) {
     return EXIT_FAILURE;
   }
 
-  int fd = open(argv[1], O_RDONLY);
+  const int fd = open(argv[1], O_RDONLY);
   if (fd < 0) {
     throw std::system_error{errno, std::system_category(), "open"};
   }

@@ -9,7 +9,7 @@
 #include "uring/uring.h"
 
 constexpr std::size_t kQueueDepth = 64;
-constexpr std::size_t kBatchSize = 32 * 1024;
+constexpr std::size_t kBatchSize = 64 * 1024;
 
 enum class event_type : uint8_t {
   NOP,
@@ -30,8 +30,9 @@ event_type& operator++(event_type& type) {
 }
 
 struct io_data {
-  explicit io_data(event_type type, std::size_t size, off_t off = 0)
-      : iov({.iov_len = size}), type(type), off(off) {
+  explicit io_data(const event_type type, const std::size_t size,
+                   const off_t off = 0)
+      : iov({.iov_len = size}), off(off), type(type) {
     iov.iov_base = malloc(size);
   }
   ~io_data() {
@@ -119,15 +120,14 @@ static void handle_cqe(liburing::uring<uring_flags>& ring, uint64_t& inflight,
 template <unsigned uring_flags>
 static void copy_file(liburing::uring<uring_flags>& ring, off_t in_size,
                       const int in_fd, const int out_fd) {
-  off_t this_size, off = 0;
+  off_t off = 0;
   uint64_t inflight = 0;
 
   while (in_size) {
-    uint64_t has_inflight = inflight;
-    int depth;
+    const uint64_t has_inflight = inflight;
 
     while (in_size && inflight < kQueueDepth) {
-      this_size = kBatchSize;
+      off_t this_size = kBatchSize;
       if (this_size > in_size) {
         this_size = in_size;
       }
@@ -141,12 +141,10 @@ static void copy_file(liburing::uring<uring_flags>& ring, off_t in_size,
       ring.submit();
     }
 
-    depth = in_size ? kQueueDepth : 1;
-
+    const int depth = in_size ? kQueueDepth : 1;
     while (inflight >= depth) {
       const liburing::cqe* cqe;
-      int ret = ring.wait_cqe(cqe);
-      if (ret < 0) {
+      if (const int ret = ring.wait_cqe(cqe); ret < 0) {
         throw std::system_error{-ret, std::system_category(), "wait cqe"};
       }
       handle_cqe(ring, inflight, cqe, in_fd, out_fd);
@@ -175,7 +173,7 @@ int main(const int argc, char* argv[]) {
   ring.init(kQueueDepth);
 
   try {
-    auto in_size = file_size(in_fd);
+    const auto in_size = file_size(in_fd);
     copy_file(ring, in_size, in_fd, out_fd);
   } catch (const std::system_error& e) {
     std::cerr << e.what() << "\n" << e.code() << "\n";
