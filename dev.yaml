@@ -2,6 +2,7 @@ packages:
   - build-essential
   - cmake
   - gdb
+  - pv
 
 groups:
   - dev

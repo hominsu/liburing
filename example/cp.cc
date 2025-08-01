@@ -2,6 +2,7 @@
 #include <sys/stat.h>
 #include <sys/uio.h>
 
+#include <cstdio>
 #include <iostream>
 #include <memory>
 
