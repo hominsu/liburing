@@ -2,6 +2,7 @@
 #include <sys/stat.h>
 #include <sys/uio.h>
 
+#include <iostream>
 #include <memory>
 
 #include "uring/uring.h"
@@ -18,16 +19,13 @@ enum class event_type : uint8_t {
 event_type& operator++(event_type& type) {
   switch (type) {
     case event_type::NOP:
-      type = event_type::READ;
-      break;
+      return type = event_type::READ;
     case event_type::READ:
-      type = event_type::WRITE;
-      break;
+      return type = event_type::WRITE;
     case event_type::WRITE:
-      type = event_type::NOP;
-      break;
+      return type = event_type::NOP;
   }
-  return type;
+  return type = event_type::NOP;
 }
 
 struct io_data {
@@ -96,13 +94,14 @@ static void rw_pair(liburing::uring<uring_flags>& ring, std::size_t size,
 
 template <unsigned uring_flags>
 static void handle_cqe(liburing::uring<uring_flags>& ring, uint64_t& inflight,
-                       liburing::cqe* cqe) {
+                       const liburing::cqe*(&cqe), const int in_fd,
+                       const int out_fd) {
   const auto data = reinterpret_cast<io_data*>(cqe->user_data);
   ++data->type;
 
   if (cqe->res < 0) {
     if (cqe->res == -ECANCELED) {
-      rw_pair(ring, data->iov.iov_len, data->off);
+      rw_pair(ring, data->iov.iov_len, data->off, in_fd, out_fd);
       inflight += 2;
     } else {
       throw std::system_error{-cqe->res, std::system_category(), "cqe error"};
@@ -114,6 +113,45 @@ static void handle_cqe(liburing::uring<uring_flags>& ring, uint64_t& inflight,
   }
 
   ring.seen_cqe(cqe);
+}
+
+template <unsigned uring_flags>
+static void copy_file(liburing::uring<uring_flags>& ring, off_t in_size,
+                      const int in_fd, const int out_fd) {
+  off_t this_size, off = 0;
+  uint64_t inflight = 0;
+
+  while (in_size) {
+    uint64_t has_inflight = inflight;
+    int depth;
+
+    while (in_size && inflight < kQueueDepth) {
+      this_size = kBatchSize;
+      if (this_size > in_size) {
+        this_size = in_size;
+      }
+      rw_pair(ring, this_size, off, in_fd, out_fd);
+      off += this_size;
+      in_size -= this_size;
+      inflight += 2;
+    }
+
+    if (has_inflight != inflight) {
+      ring.submit();
+    }
+
+    depth = in_size ? kQueueDepth : 1;
+
+    while (inflight >= depth) {
+      const liburing::cqe* cqe;
+      int ret = ring.wait_cqe(cqe);
+      if (ret < 0) {
+        throw std::system_error{-ret, std::system_category(), "wait cqe"};
+      }
+      handle_cqe(ring, inflight, cqe, in_fd, out_fd);
+      --inflight;
+    }
+  }
 }
 
 int main(const int argc, char* argv[]) {
@@ -134,6 +172,18 @@ int main(const int argc, char* argv[]) {
 
   liburing::uring<IORING_SETUP_NO_SQARRAY> ring;
   ring.init(kQueueDepth);
+
+  try {
+    auto in_size = file_size(in_fd);
+    copy_file(ring, in_size, in_fd, out_fd);
+  } catch (const std::system_error& e) {
+    std::cerr << e.what() << "\n" << e.code() << "\n";
+  } catch (const std::exception& e) {
+    std::cerr << e.what() << '\n';
+  }
+
+  close(in_fd);
+  close(out_fd);
 
   return 0;
 }
