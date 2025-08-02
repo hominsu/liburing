@@ -19,6 +19,7 @@ add_library(${PROJECT_NAME}::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
 
 include(${PROJECT_SOURCE_DIR}/cmake/Option.cmake)
 include(${PROJECT_SOURCE_DIR}/cmake/Configure.cmake)
+include(${PROJECT_SOURCE_DIR}/cmake/Install.cmake)
 
 target_include_directories(${PROJECT_NAME} INTERFACE
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
