@@ -462,8 +462,7 @@ uring<uring_flags>::_peek_cqe() noexcept {
       break;
     }
 
-    ret._cqe =
-        &cq_.cqes_[(head & cq_.ring_mask_) << cq<uring_flags>::cqe_shift()];
+    ret._cqe = &cq_.at(head);
     if (!(features_ & IORING_FEAT_EXT_ARG) &&
         ret._cqe->user_data == LIBURING_UDATA_TIMEOUT) [[unlikely]] {
       ret.res = ret._cqe->res < 0 ? ret._cqe->res : 0;

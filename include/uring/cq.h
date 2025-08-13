@@ -26,7 +26,14 @@ class cq {
 
   void setup_ring_pointers(const uring_params<uring_flags> &p) noexcept;
 
+  template <typename Fn>
+    requires std::invocable<Fn, cqe *>
+  unsigned for_each(Fn fn) noexcept(std::is_nothrow_invocable_v<Fn, cqe *>);
+
   void advance(unsigned nr) noexcept;
+
+  cqe &at(unsigned offset) noexcept;
+  const cqe &at(unsigned offset) const noexcept;
 
   static constexpr unsigned cqe_shift_from_flags(unsigned flags) noexcept;
   static constexpr unsigned cqe_shift() noexcept;
@@ -62,10 +69,34 @@ void cq<uring_flags>::setup_ring_pointers(
 }
 
 template <unsigned uring_flags>
+template <typename Fn>
+  requires std::invocable<Fn, cqe *>
+unsigned cq<uring_flags>::for_each(Fn fn) noexcept(
+    std::is_nothrow_invocable_v<Fn, cqe *>) {
+  unsigned cnt = 0;
+  for (auto head = *khead_; head != io_uring_smp_load_acquire(ktail_);
+       ++head, ++cnt) {
+    cqe *cqe = at(head);
+    fn(cqe);
+  }
+  return cnt;
+}
+
+template <unsigned uring_flags>
 void cq<uring_flags>::advance(const unsigned nr) noexcept {
   if (nr) [[likely]] {
     io_uring_smp_store_release(khead_, *khead_ + nr);
   }
+}
+
+template <unsigned uring_flags>
+cqe &cq<uring_flags>::at(const unsigned offset) noexcept {
+  return cqes_[(offset & ring_mask_) << cqe_shift()];
+}
+
+template <unsigned uring_flags>
+const cqe &cq<uring_flags>::at(const unsigned offset) const noexcept {
+  return cqes_[(offset & ring_mask_) << cqe_shift()];
 }
 
 template <unsigned uring_flags>
