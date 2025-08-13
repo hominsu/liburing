@@ -76,7 +76,7 @@ unsigned cq<uring_flags>::for_each(Fn fn) noexcept(
   unsigned cnt = 0;
   for (auto head = *khead_; head != io_uring_smp_load_acquire(ktail_);
        ++head, ++cnt) {
-    cqe *cqe = at(head);
+    cqe *cqe = &at(head);
     fn(cqe);
   }
   return cnt;
