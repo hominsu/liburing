@@ -72,6 +72,10 @@ class uring {
   int peek_cqe(const cqe *(&cqe_ptr)) noexcept;
   void seen_cqe(const cqe *cqe) noexcept;
 
+  template <typename Fn>
+    requires std::invocable<Fn, cqe *>
+  unsigned for_each(Fn fn) noexcept(std::is_nothrow_invocable_v<Fn, cqe *>);
+
   bool sq_ring_needs_enter(unsigned submit, unsigned &flags) noexcept;
   bool cq_ring_needs_flush() noexcept;
   bool cq_ring_needs_enter() noexcept;
@@ -246,6 +250,14 @@ template <unsigned uring_flags>
 void uring<uring_flags>::seen_cqe([[maybe_unused]] const cqe *cqe) noexcept {
   assert(cqe);
   cq_.advance(1);
+}
+
+template <unsigned uring_flags>
+template <typename Fn>
+  requires std::invocable<Fn, cqe *>
+unsigned uring<uring_flags>::for_each(Fn fn) noexcept(
+    std::is_nothrow_invocable_v<Fn, cqe *>) {
+  return cq_.for_each(std::forward<Fn>(fn));
 }
 
 template <unsigned uring_flags>
